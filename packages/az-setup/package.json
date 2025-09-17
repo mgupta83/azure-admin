@@ -1,0 +1,13 @@
+{
+  "name": "@azure-admin/az-setup",
+  "version": "1.0.0",
+  "description": "Azure setup scripts for monitoring infrastructure",
+  "type": "module",
+  "scripts": {
+    "setup": "node setup-monitoring.js",
+    "clean": "echo 'Cleaning az-setup...'",
+    "lint": "echo 'No linting needed for scripts'"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
