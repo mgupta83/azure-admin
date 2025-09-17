@@ -10,8 +10,11 @@
  */
 
 import { execSync } from 'child_process';
+import {writeFileSync, unlinkSync} from 'fs';
 
-const RESOURCE_GROUP = 'az_monitoring';
+const LOCATION = 'East US2';
+const RESOURCE_GROUP = 'az_monitoring'; // Azure Resource Group name
+const AZURE_AD_GROUP = 'az_monitoring_ad'; // Azure AD Group name
 const ROLE_NAME = 'Azure Monitoring Reader';
 
 function runCommand(command, description) {
@@ -20,7 +23,7 @@ function runCommand(command, description) {
   
   try {
     const output = execSync(command, { encoding: 'utf-8', stdio: 'pipe' });
-    console.log(`✅ Success: ${description}`);
+    console.log(`✅ Success: ${description} | Output: ${output.trim()}`);
     return output;
   } catch (error) {
     console.error(`❌ Failed: ${description}`);
@@ -37,9 +40,7 @@ function createCustomRole() {
       // Storage Account permissions
       "Microsoft.Storage/storageAccounts/read",
       "Microsoft.Storage/storageAccounts/blobServices/containers/read",
-      "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read",
       "Microsoft.Storage/storageAccounts/queueServices/queues/read",
-      "Microsoft.Storage/storageAccounts/queueServices/queues/messages/read",
       
       // Cosmos DB permissions  
       "Microsoft.DocumentDB/databaseAccounts/read",
@@ -54,7 +55,6 @@ function createCustomRole() {
       
       // Key Vault permissions
       "Microsoft.KeyVault/vaults/read",
-      "Microsoft.KeyVault/vaults/certificates/read",
       "Microsoft.KeyVault/vaults/secrets/read"
     ],
     "NotActions": [],
@@ -84,15 +84,22 @@ function createCustomRole() {
   // Replace subscription ID in role definition
   roleDefinition.AssignableScopes[0] = roleDefinition.AssignableScopes[0].replace('{{SUBSCRIPTION_ID}}', subscriptionId);
 
-  // Write role definition to temp file
-  const roleDefPath = '/tmp/azure-monitoring-role.json';
-  require('fs').writeFileSync(roleDefPath, JSON.stringify(roleDefinition, null, 2));
-
-  // Create the custom role
-  runCommand(
-    `az role definition create --role-definition "${roleDefPath}"`,
-    'Creating custom Azure Monitoring Reader role'
-  );
+  const roleDefPath = './azure-monitoring-role.json';
+  try{
+    // Write role definition to temp file
+    writeFileSync(roleDefPath, JSON.stringify(roleDefinition, null, 2));
+    // Create the custom role
+    runCommand(
+      `az role definition create --role-definition "${roleDefPath}"`,
+      'Creating custom Azure Monitoring Reader role'
+    );
+  } catch (error) {
+    console.error('❌ Failed to create custom role.', error.message);
+    throw error;
+  } finally {
+    // Clean up temp file
+    unlinkSync(roleDefPath);
+  }
 
   return subscriptionId;
 }
@@ -108,7 +115,7 @@ function createResourceGroup(subscriptionId) {
   } catch (error) {
     // Create resource group if it doesn't exist
     runCommand(
-      `az group create --name ${RESOURCE_GROUP} --location "East US"`,
+      `az group create --name ${RESOURCE_GROUP} --location "${LOCATION}"`,
       `Creating resource group ${RESOURCE_GROUP}`
     );
   }
@@ -121,32 +128,32 @@ function assignRoleToGroup(subscriptionId) {
     'Getting custom role ID'
   ).trim();
 
-  // Get the group object ID
+  // Get the Azure AD group object ID
   const groupId = runCommand(
-    `az ad group show --group ${RESOURCE_GROUP} --query id --output tsv`,
-    `Getting ${RESOURCE_GROUP} group object ID`
+    `az ad group show --group ${AZURE_AD_GROUP} --query id --output tsv`,
+    `Getting ${AZURE_AD_GROUP} Azure AD group object ID`
   ).trim();
 
   // Assign role to the group at subscription level
   runCommand(
     `az role assignment create --assignee ${groupId} --role "${roleId}" --scope "/subscriptions/${subscriptionId}"`,
-    `Assigning ${ROLE_NAME} role to ${RESOURCE_GROUP} group`
+    `Assigning ${ROLE_NAME} role to ${AZURE_AD_GROUP} Azure AD group`
   );
 }
 
 function createAzureADGroup() {
-  // Check if group exists
+  // Check if Azure AD group exists
   try {
     runCommand(
-      `az ad group show --group ${RESOURCE_GROUP}`,
+      `az ad group show --group ${AZURE_AD_GROUP}`,
       'Checking if Azure AD group exists'
     );
-    console.log(`ℹ️  Azure AD group ${RESOURCE_GROUP} already exists`);
+    console.log(`ℹ️  Azure AD group ${AZURE_AD_GROUP} already exists`);
   } catch (error) {
     // Create Azure AD group if it doesn't exist
     runCommand(
-      `az ad group create --display-name ${RESOURCE_GROUP} --mail-nickname ${RESOURCE_GROUP}`,
-      `Creating Azure AD group ${RESOURCE_GROUP}`
+      `az ad group create --display-name ${AZURE_AD_GROUP} --mail-nickname ${AZURE_AD_GROUP}`,
+      `Creating Azure AD group ${AZURE_AD_GROUP}`
     );
   }
 }
@@ -162,25 +169,25 @@ function main() {
     // Create custom role
     const subscriptionId = createCustomRole();
     
-    // Create Azure AD group
-    createAzureADGroup();
-    
-    // Create resource group
-    createResourceGroup(subscriptionId);
-    
-    // Assign role to group
-    assignRoleToGroup(subscriptionId);
-    
-    console.log('\n🎉 Azure Monitoring Infrastructure Setup Complete!');
-    console.log('==================================================');
-    console.log(`✅ Created/verified resource group: ${RESOURCE_GROUP}`);
-    console.log(`✅ Created/verified Azure AD group: ${RESOURCE_GROUP}`);
-    console.log(`✅ Created custom role: ${ROLE_NAME}`);
-    console.log(`✅ Assigned monitoring permissions to the group`);
-    console.log('\n📝 Next steps:');
-    console.log('1. Add users to the az_monitoring Azure AD group');
-    console.log('2. Deploy the UI application');
-    console.log('3. Configure OIDC authentication in the UI');
+  // Create Azure AD group
+  createAzureADGroup();
+
+  // Create resource group
+  createResourceGroup(subscriptionId);
+
+  // Assign role to Azure AD group
+  assignRoleToGroup(subscriptionId);
+
+  console.log('\n🎉 Azure Monitoring Infrastructure Setup Complete!');
+  console.log('==================================================');
+  console.log(`✅ Created/verified resource group: ${RESOURCE_GROUP}`);
+  console.log(`✅ Created/verified Azure AD group: ${AZURE_AD_GROUP}`);
+  console.log(`✅ Created custom role: ${ROLE_NAME}`);
+  console.log(`✅ Assigned monitoring permissions to the Azure AD group`);
+  console.log('\n📝 Next steps:');
+  console.log(`1. Add users to the ${AZURE_AD_GROUP} Azure AD group`);
+  console.log('2. Deploy the UI application');
+  console.log('3. Configure OIDC authentication in the UI');
     
   } catch (error) {
     console.error('\n💥 Setup failed!');
